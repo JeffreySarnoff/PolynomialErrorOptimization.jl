@@ -1,6 +1,3 @@
-using Pkg
-Pkg.develop(PackageSpec(path=joinpath(@__DIR__, "..")))
-
 using Documenter
 using PolynomialErrorOptimization
 
@@ -29,6 +26,7 @@ makedocs(
 
 if get(ENV, "CI", "false") == "true"
     deploydocs(
-        repo="",
+        repo="github.com/JeffreySarnoff/PolynomialErrorOptimization.jl.git",
+        devbranch="main",
     )
 end

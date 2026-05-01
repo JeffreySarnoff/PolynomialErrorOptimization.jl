@@ -1,0 +1,56 @@
+name: Bug report
+description: Report a reproducible defect in the package, docs, or CI.
+title: '[Bug]: '
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Include the smallest reproducer you can. For numerical issues, include the function, interval, degree, evaluation scheme, and Julia version.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What failed, and what did you expect instead?
+      placeholder: A short description of the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: reproducer
+    attributes:
+      label: Minimal reproducer
+      description: Paste a self-contained script or REPL session.
+      render: julia
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Package version or commit
+      placeholder: e.g. main at abc1234
+    validations:
+      required: true
+  - type: input
+    id: julia-version
+    attributes:
+      label: Julia version
+      placeholder: e.g. 1.10.9
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Linux
+        - macOS
+        - Windows
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Add logs, stack traces, screenshots, or notes that help narrow the failure.

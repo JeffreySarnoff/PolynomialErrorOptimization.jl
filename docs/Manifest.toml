@@ -1237,7 +1237,7 @@ version = "0.2.2"
 
 [[deps.PolynomialErrorOptimization]]
 deps = ["ArgCheck", "LinearAlgebra", "LinearSolve", "Optim", "Polynomials", "Printf"]
-path = "C:\\Users\\Custom PC\\Downloads\\PolynomialErrorOptimization_tar (2)\\PolynomialErrorOptimization2\\PolynomialErrorOptimization\\docs\\.."
+path = ".."
 uuid = "a8e3a1f2-7c4b-4d6e-9f3a-1b2c3d4e5f6a"
 version = "0.1.0"
 
