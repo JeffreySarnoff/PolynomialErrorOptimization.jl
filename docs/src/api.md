@@ -1,8 +1,95 @@
 # API Reference
 
-This page lists the public API by category.
+This page lists the API by stability layer rather than by implementation file.
 
-## Core domain types
+## Stable workflow layer
+
+Use these first.
+
+- `approxfit`
+- `fit_abs`
+- `fit_rel`
+- `plan_fit`
+- `recommend_parameters`
+- `ObjectiveSpec`
+- `ComplexitySpec`
+- `PrecisionSpec`
+- `SearchSpec`
+- `FitPlan`
+- `FitParameters`
+- `Approximation`
+- `error_bound`
+- `coeff_count`
+- `is_piecewise`
+- `pieces`
+- `horner_scheme`
+- `fma_horner_scheme`
+- `estrin_scheme`
+- `fma_estrin_scheme`
+
+`plan_fit` and the typed spec objects provide the structured planning path.
+`FitParameters` remains the flattened executable bundle used by the current
+keyword API. The high-level keywords separate `target_type` for returned
+coefficients and the modeled default floating-point format from
+`compute_type` for internal optimization arithmetic.
+
+Everything in the stable workflow layer is exported from
+`PolynomialErrorOptimization`.
+
+## Expert layer
+
+Use these when the stable workflow layer is too coarse.
+
+Expert names remain defined on `PolynomialErrorOptimization` but are not
+exported; access them via explicit imports or module-qualified calls.
+
+### Fixed-degree drivers
+
+- `eval_approx_optimize`
+- `eval_approx_optimize_relative`
+- `eval_approx_optimize_relative_zero`
+- `OptimResult`
+- `ResultBasis`
+- `basis_info`
+- `solution_coefficients`
+
+`OptimResult.poly` is always a monomial-basis polynomial. For
+`eval_approx_optimize_relative_zero`, `basis_info(result)` records whether the
+optimization solve used a shifted basis and `solution_coefficients(result)`
+returns that original coefficient vector explicitly.
+
+### Piecewise drivers and results
+
+- `approximate`
+- `approximate_abs`
+- `approximate_rel`
+- `approximate_abs_budget`
+- `approximate_rel_budget`
+- `default_scheme_builder`
+- `ApproxPiece`
+- `PiecewisePolyApprox`
+- `FitAttemptReport`
+
+### Search and export tools
+
+- `SearchStrategy`
+- `GridSearch`
+- `GridThenLocal`
+- `GridThenOptim`
+- `provide_source`
+- `provide`
+- `provide_file`
+- `horner_eval`
+- `fma_horner_eval`
+- `estrin_eval`
+- `fma_estrin_eval`
+
+## Advanced and research layer
+
+These APIs are useful for contributors and research workflows, but they are
+not the recommended starting point for package users.
+
+### Exchange building blocks
 
 - `Index`
 - `Signature`
@@ -11,85 +98,12 @@ This page lists the public API by category.
 - `AbsoluteMode`
 - `RelativeMode`
 - `RelativeZeroMode`
-
-## Driver result type
-
-- `OptimResult`
-
-`OptimResult{TargetT,ComputeT}` stores polynomial coefficients in `TargetT`
-and verified error/search state in `ComputeT`.
-
-## Search strategies
-
-- `SearchStrategy`
-- `GridSearch`
-- `GridThenLocal`
-- `GridThenOptim`
-
-## Piecewise result types
-
-- `ApproxPiece`
-- `PiecewisePolyApprox`
-
-## High-level interface
-
-- `approxfit`
-- `PolynomialErrorOptimization.fit` (unexported; prefer `approxfit`)
-- `fit_abs`
-- `fit_rel`
-- `recommend_parameters`
-- `FitParameters`
-- `Approximation`
-- `error_bound`
-- `coeff_count`
-- `is_piecewise`
-- `pieces`
-
-The high-level `approxfit`/`recommend_parameters` keywords include
-`target_type` for returned coefficients and the default modeled
-floating-point format, and `compute_type` for internal optimization
-arithmetic.
-
-## Top-level optimization drivers
-
-- `eval_approx_optimize`
-- `eval_approx_optimize_relative`
-- `eval_approx_optimize_relative_zero`
-
-## Piecewise approximation drivers
-
-- `approximate`
-- `approximate_abs`
-- `approximate_rel`
-- `approximate_abs_budget`
-- `approximate_rel_budget`
-- `default_scheme_builder`
-
-## Standalone evaluator generation
-
-- `provide_source`
-- `provide`
-- `provide_file`
-
-## Evaluation scheme builders and evaluators
-
-- `horner_scheme`
-- `fma_horner_scheme`
-- `estrin_scheme`
-- `fma_estrin_scheme`
-- `horner_eval`
-- `fma_horner_eval`
-- `estrin_eval`
-- `fma_estrin_eval`
-
-## Exchange algorithm building blocks
-
 - `init_points`
 - `solve_primal`
 - `find_new_index`
 - `exchange`
 
-## Symbolic error-model API
+### Symbolic error-model API
 
 - `ErrExpr`
 - `VarT`
@@ -108,14 +122,13 @@ arithmetic.
 - `estrin_expr`
 - `fma_estrin_expr`
 
-## Exceptions
+### Exceptions
 
 - `ExchangeFailure`
 - `ConvergenceFailure`
 
-## Where to find remaining signatures
+## Canonical signatures
 
-The canonical source of signatures and docstrings is the source code in
-`src/`. In particular, the high-level interface docstrings in
-`src/interface.jl` are the source of truth for argument meanings and examples.
-
+The canonical source of signatures and docstrings is the code in `src/`. In
+particular, `src/interface.jl`, `src/exchange/driver.jl`, and `src/piecewise/public.jl`
+define the user-facing contracts.

@@ -339,7 +339,7 @@ This would immediately make the package feel more intentional without deleting a
 
 ## Suggested Migration Plan
 
-## Phase 1: Clarify without breaking behavior
+## Phase 1: Clarify the package surface
 
 - Define and document the intended stable user surface.
 - Mark expert and internal APIs clearly in docs.
@@ -351,7 +351,7 @@ This would immediately make the package feel more intentional without deleting a
 
 - Introduce typed configuration structs.
 - Introduce structured rejection and convergence reports.
-- Preserve current keyword-based APIs as compatibility shims.
+- Keep the keyword-driven path and the typed planning path aligned.
 - Add docs-backed smoke tests.
 
 ## Phase 3: Harden mathematical and architectural boundaries

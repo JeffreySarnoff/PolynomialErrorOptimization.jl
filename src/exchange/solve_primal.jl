@@ -61,14 +61,6 @@ function solve_primal(f, scheme::EvalScheme{T}, ω::Vector{Index{T}},
         @inbounds for j in mode.s:n
             b[j+1] = x[j-mode.s+2]
         end
-
-        if mode.t_z != zero(T)
-            @warn ("RelativeZeroMode with t_z = $(mode.t_z) ≠ 0: the " *
-                   "returned polynomial coefficients are in the SHIFTED " *
-                   "basis (t − t_z)ʲ, NOT in the monomial basis tʲ. " *
-                   "The evaluation-error bound carried by `scheme` is for " *
-                   "the monomial basis; treat the result as advisory.")
-        end
         return ā, b
     elseif mode isa RelativeMode
         x = _solve_mode_system(f, scheme, ω, mode)

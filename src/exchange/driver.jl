@@ -16,6 +16,24 @@ The public entry points are:
 # ---------------------------------------------------------------------------
 
 """
+    ResultBasis{T<:AbstractFloat}
+
+Explicit basis metadata for an `OptimResult`.
+
+# Fields
+* `coefficient_basis::Symbol` — basis used by `result.poly`.
+* `solution_basis::Symbol`    — basis used by `solution_coefficients(result)`.
+* `shift::T`                  — origin shift for a shifted basis.
+* `zero_order::Int`           — known zero order used by `RelativeZeroMode`.
+"""
+struct ResultBasis{T<:AbstractFloat}
+    coefficient_basis::Symbol
+    solution_basis::Symbol
+    shift::T
+    zero_order::Int
+end
+
+"""
     OptimResult{TargetT<:AbstractFloat,ComputeT<:AbstractFloat}
 
 Return value of `eval_approx_optimize` (and the relative variants).
@@ -30,6 +48,10 @@ Return value of `eval_approx_optimize` (and the relative variants).
 * `discretization::Vector{Index{ComputeT}}` — final ω.
 * `dual::Vector{ComputeT}`        — final y (length `n+2`, all ≥ 0).
 * `converged::Bool`               — `true` iff the τ-tolerance was met.
+* `basis::ResultBasis{ComputeT}`  — explicit basis metadata for the stored
+                                    polynomial and the optimisation solve.
+* `solution_coeffs`               — coefficient vector in `basis.solution_basis`
+                                    (natural order, converted to `TargetT`).
 
 The contract of paper Theorem 2 is
 
@@ -43,13 +65,67 @@ struct OptimResult{TargetT<:AbstractFloat,ComputeT<:AbstractFloat}
     discretization::Vector{Index{ComputeT}}
     dual::Vector{ComputeT}
     converged::Bool
+    basis::ResultBasis{ComputeT}
+    solution_coeffs::Vector{TargetT}
 end
 
 function Base.show(io::IO, r::OptimResult)
     print(io, "OptimResult(",
         "total_error=", r.total_error,
         ", iter=", r.iterations,
+        r.basis.solution_basis === r.basis.coefficient_basis ? "" :
+        ", basis=:" * String(r.basis.solution_basis) * "->:" *
+        String(r.basis.coefficient_basis),
         ", converged=", r.converged, ")")
+end
+
+"""
+    basis_info(result::OptimResult) -> ResultBasis
+
+Return the basis metadata for an optimization result.
+"""
+basis_info(r::OptimResult) = r.basis
+
+"""
+    solution_coefficients(result::OptimResult)
+
+Return the coefficient vector in the basis recorded by `basis_info(result)`.
+For most modes this matches `Polynomials.coeffs(result.poly)`. For
+`RelativeZeroMode` with a nonzero shift it preserves the shifted-basis
+coefficients used by the optimisation solve.
+"""
+solution_coefficients(r::OptimResult) = copy(r.solution_coeffs)
+
+function _result_basis(mode::AbstractMode, ::Type{T}) where {T<:AbstractFloat}
+    return ResultBasis{T}(:monomial, :monomial, zero(T), 0)
+end
+
+function _result_basis(mode::RelativeZeroMode{T}, ::Type{T}) where {T<:AbstractFloat}
+    solution_basis = iszero(mode.t_z) ? :monomial : :shifted
+    return ResultBasis{T}(:monomial, solution_basis, mode.t_z, mode.s)
+end
+
+function _shifted_to_monomial(a::AbstractVector{T}, shift::T) where {T<:AbstractFloat}
+    n = length(a) - 1
+    mono = zeros(T, n + 1)
+    @inbounds for j in 0:n
+        aj = a[j+1]
+        if !iszero(aj)
+            for k in 0:j
+                mono[k+1] += aj * T(binomial(j, k)) * ((-shift)^(j - k))
+            end
+        end
+    end
+    return mono
+end
+
+function _result_polynomial(a::AbstractVector{T}, mode::AbstractMode, ::Type{TargetT}) where {T<:AbstractFloat,TargetT<:AbstractFloat}
+    return Polynomials.Polynomial(TargetT.(a), :t)
+end
+
+function _result_polynomial(a::AbstractVector{T}, mode::RelativeZeroMode{T}, ::Type{TargetT}) where {T<:AbstractFloat,TargetT<:AbstractFloat}
+    coeffs = iszero(mode.t_z) ? a : _shifted_to_monomial(a, mode.t_z)
+    return Polynomials.Polynomial(TargetT.(coeffs), :t)
 end
 
 """
@@ -188,6 +264,7 @@ function eval_approx_optimize_relative_zero(f, n::Integer,
     @argcheck s ≥ 1 && s ≤ n ArgumentError(
         "RelativeZeroMode requires 1 ≤ s ≤ n; got s=$s, n=$n")
     tl, tr = T(I[1]), T(I[2])
+    _check_relzero_structure(f, tl, tr, T(t_z), s, T)
     cfg = DriveConfig(T(τ), Int(max_iter), strategy, verbose)
     return _drive(f, n, (tl, tr), scheme,
         RelativeZeroMode{T}(t_z, s), cfg, target_type)
@@ -246,9 +323,18 @@ function _drive(f, n::Int, I::Tuple{T,T},
         converged = is_converged(ā, astar)
     end
 
-    # `Polynomials.Polynomial` takes coefficients in natural order.
-    poly = Polynomials.Polynomial(TargetT.(a), :t)
-    return OptimResult{TargetT,T}(poly, astar, ā, iter, ω, y, true)
+    basis = _result_basis(mode, T)
+    poly = _result_polynomial(a, mode, TargetT)
+    return OptimResult{TargetT,T}(
+        poly,
+        astar,
+        ā,
+        iter,
+        ω,
+        y,
+        true,
+        basis,
+        TargetT.(a))
 end
 
 # ---------------------------------------------------------------------------
@@ -268,6 +354,58 @@ function _check_nonvanishing(f, tl::T, tr::T, ::Type{T};
             "_check_nonvanishing: f vanishes inside I (at t=$t); " *
             "use eval_approx_optimize_relative_zero."))
         minabs = min(minabs, fv)
+    end
+    return minabs
+end
+
+function _relzero_probe_delta(tl::T, tr::T, t_z::T) where T<:AbstractFloat
+    scale = max(one(T), abs(tl), abs(tr), abs(t_z), abs(tr - tl))
+    return sqrt(eps(T)) * scale
+end
+
+function _quotient_sample_points(tl::T, tr::T, t_z::T, samples::Int) where T<:AbstractFloat
+    points = T[]
+    push!(points, tl)
+    if tl < t_z < tr
+        δ = _relzero_probe_delta(tl, tr, t_z)
+        left = max(tl, t_z - δ)
+        right = min(tr, t_z + δ)
+        left > tl && push!(points, left)
+        right < tr && push!(points, right)
+    end
+    @inbounds for k in 1:(samples-1)
+        t = tl + (tr - tl) * T(k) / T(samples)
+        t == t_z && continue
+        push!(points, t)
+    end
+    push!(points, tr)
+    return unique(points)
+end
+
+function _check_relzero_structure(f, tl::T, tr::T, t_z::T, s::Int, ::Type{T};
+    samples::Int=64) where T<:AbstractFloat
+    @argcheck tl ≤ t_z ≤ tr ArgumentError(
+        "RelativeZeroMode requires t_z=$t_z to lie inside I=($tl, $tr)")
+
+    seen_sign = Int8(0)
+    minabs = T(Inf)
+    for t in _quotient_sample_points(tl, tr, t_z, samples)
+        Δ = t - t_z
+        iszero(Δ) && continue
+        q = T(f(t)) / (Δ^s)
+        isfinite(q) || throw(DomainError(t,
+            "RelativeZeroMode quotient f(t)/(t-t_z)^s is not finite at t=$t"))
+        iszero(q) && throw(DomainError(t,
+            "RelativeZeroMode quotient vanishes at sampled point t=$t; check t_z and s or use absolute mode"))
+
+        qsign = signum_int8(q)
+        if seen_sign == Int8(0)
+            seen_sign = qsign
+        elseif qsign != seen_sign
+            throw(DomainError(t,
+                "RelativeZeroMode quotient changes sign on sampled points; check t_z and s or use absolute mode"))
+        end
+        minabs = min(minabs, abs(q))
     end
     return minabs
 end

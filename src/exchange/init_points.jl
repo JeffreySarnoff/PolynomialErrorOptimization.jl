@@ -11,6 +11,33 @@ By Lemma 1 of the paper, this initialisation:
 * yields a unique optimal dual `y⁽⁰⁾` with `yⱼ⁽⁰⁾ > 0` for all `j`.
 """
 
+function _step_inside_interval(t::T, tl::T, tr::T, toward_right::Bool) where T<:AbstractFloat
+    if toward_right
+        moved = nextfloat(t)
+        return moved <= tr ? moved : prevfloat(t)
+    end
+    moved = prevfloat(t)
+    return moved >= tl ? moved : nextfloat(t)
+end
+
+function _avoid_relzero_singularity(t::T, tl::T, tr::T, f,
+    mode::RelativeZeroMode{T}) where T<:AbstractFloat
+    candidate = t
+    toward_right = candidate <= mode.t_z
+    for _ in 1:16
+        value = T(f(candidate))
+        if isfinite(value) && !iszero(value)
+            return candidate
+        end
+        moved = _step_inside_interval(candidate, tl, tr, toward_right)
+        moved == candidate && break
+        candidate = moved
+        toward_right = candidate <= mode.t_z
+    end
+    throw(DomainError(t,
+        "init_points: could not place a RelativeZeroMode node away from a zero/singularity near t=$t"))
+end
+
 """
     init_points(scheme, I) -> (ω, y)
 
@@ -90,6 +117,9 @@ function init_points(scheme::EvalScheme{T}, I::Tuple{T,T},
 
     @inbounds for j in 1:m
         tj = half_sum + cospi(T(j - 1) / T(max(m - 1, 1))) * half_diff
+        if mode isa RelativeZeroMode
+            tj = _avoid_relzero_singularity(tj, tl, tr, f, mode)
+        end
         σ = zeros(Int8, σlen)
         σ[1] = isodd(j) ? Int8(1) : Int8(-1)
         ω[j] = Index{T}(tj, σ)

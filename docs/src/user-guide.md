@@ -1,6 +1,7 @@
 # User Guide
 
-This guide explains how to use the package effectively for common workflows.
+This guide is for the expert layer: users who need to choose explicit drivers,
+search strategies, or piecewise policies.
 
 ## 1. Installation and setup
 
@@ -16,6 +17,19 @@ Then load the package:
 
 ```julia
 using PolynomialErrorOptimization
+
+# Expert APIs are defined on the module but are not exported.
+import PolynomialErrorOptimization: eval_approx_optimize,
+  eval_approx_optimize_relative,
+  eval_approx_optimize_relative_zero,
+  approximate,
+  approximate_abs,
+  approximate_abs_budget,
+  GridSearch,
+  GridThenLocal,
+  GridThenOptim,
+  basis_info,
+  solution_coefficients
 ```
 
 ## 2. Core concepts
@@ -26,7 +40,7 @@ using PolynomialErrorOptimization
 - `PiecewisePolyApprox`: callable piecewise approximation returned by adaptive drivers.
 - `Approximation`: high-level wrapper returned by `approxfit`.
 
-For most new workflows, start with the high-level `approxfit` interface:
+For most new workflows, start with the stable `approxfit` interface:
 
 ```julia
 approx = approxfit(sin, (-3.0, 3.0); target = 1e-8)
@@ -34,8 +48,9 @@ approx = approxfit(sin, (-3.0, 3.0); target = 1e-8)
 @show coeff_count(approx)
 ```
 
-See [High-Level Interface](high-level-interface.md) for parameter
-recommendations and examples.
+See [High-Level Interface](high-level-interface.md) for the recommended
+workflow and [Choosing a Workflow](choosing-a-workflow.md) for the decision
+guide.
 
 ## 3. Fixed-degree optimization
 
@@ -94,6 +109,42 @@ res_rel = eval_approx_optimize_relative(f, n, I, scheme; τ = 1e-3)
 
 Use `eval_approx_optimize_relative_zero` when a known finite-order zero is part of the model assumptions.
 
+For `eval_approx_optimize_relative_zero`, `res.poly` is stored in the
+monomial basis even when the optimization solve itself used a shifted basis.
+Use `basis_info(res)` to inspect that basis metadata and
+`solution_coefficients(res)` to recover the coefficient vector in the original
+solve basis.
+
+This end-to-end expert example uses a known simple zero at `t_z = 0` and a
+deterministic grid search over an interval that does not contain any other
+zeros.
+
+```julia
+res_rz = eval_approx_optimize_relative_zero(
+  t -> t * exp(t),
+  4,
+  (-0.35, 1.1),
+  horner_scheme(4; u = 2.0^-53);
+  t_z = 0.0,
+  s = 1,
+  τ = 1e-2,
+  max_iter = 20,
+  strategy = GridSearch(4097))
+
+info = basis_info(res_rz)
+coeffs = solution_coefficients(res_rz)
+
+@show res_rz.total_error
+@show res_rz.iterations
+@show info.zero_order
+@show info.solution_basis
+@show coeffs
+```
+
+When `t_z != 0`, `basis_info(res_rz).solution_basis` records whether the
+solve basis is shifted while `res_rz.poly` remains stored in the monomial
+basis for evaluation and source generation.
+
 ## 4. Choosing a search strategy
 
 Available strategies:
@@ -146,6 +197,17 @@ pa_budget = approximate_abs_budget(sin, 6, (-3.0, 3.0);
 - `:max`: always use the largest allowed degree.
 - `:min`: smallest local degree that meets target.
 - `:min_cost`: globally cost-aware recursive choice.
+
+### Structured rejection diagnostics
+
+Piecewise fit attempts now carry a structured `FitAttemptReport` internally.
+Each report records whether the attempt was accepted, the rejection kind,
+interval, degree, mode, target, achieved error, and any caught exception.
+
+The adaptive drivers still surface concise refusal messages such as
+`reason: err > target`, but contributors and expert users can inspect the
+structured report directly through the internal `_try_fit` path when debugging
+piecewise behaviour or adding regressions.
 
 ### Unified API
 
@@ -208,6 +270,8 @@ The full parameter-selection playbook is now documented in its own part:
   ensure `f` has no interior zero for `eval_approx_optimize_relative`.
 - Budget/depth failure errors in piecewise mode:
   increase `max_depth`, relax `target`, or allow larger `max_coeffs`.
+  The refusal message now preserves the immediate rejection reason from the
+  structured attempt report.
 
 ## 10. Reproducibility tips
 
@@ -218,4 +282,4 @@ The full parameter-selection playbook is now documented in its own part:
 ## 11. Worked examples
 
 For complete end-to-end recipes (including constrained setups for `cos` and
-`acos`), see the dedicated [Examples](examples.md) section.
+`acos`), see the dedicated [Recipes](examples.md) section.

@@ -16,10 +16,12 @@ makedocs(
     pages=[
         "Home" => "index.md",
         "High-Level Interface" => "high-level-interface.md",
+        "Choosing a Workflow" => "choosing-a-workflow.md",
         "User Guide" => "user-guide.md",
         "Parameter Selection" => "parameter-selection.md",
-        "Examples" => "examples.md",
+        "Recipes" => "examples.md",
         "Technical Guide" => "technical-guide.md",
+        "Contributor Guide" => "contributor-guide.md",
         "API Reference" => "api.md",
     ],
 )

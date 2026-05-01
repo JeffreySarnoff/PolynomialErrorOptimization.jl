@@ -1,6 +1,44 @@
 
 """
-    _try_fit(f, n, (a, b), scheme, mode; ...) -> (res, ok, why)
+        FitAttemptReport
+
+Structured report returned by `_try_fit` for both accepted and rejected
+piecewise fit attempts.
+"""
+struct FitAttemptReport{T<:AbstractFloat}
+    accepted::Bool
+    kind::Symbol
+    interval::Tuple{T,T}
+    degree::Int
+    mode::Symbol
+    target::T
+    achieved_error::Union{T,Nothing}
+    exception::Union{Exception,Nothing}
+    message::String
+end
+
+Base.show(io::IO, report::FitAttemptReport) = print(io, report.message)
+
+function _fit_attempt_report(ab::Tuple{T,T}, n::Int, mode::AbstractMode, target::T;
+    accepted::Bool,
+    kind::Symbol,
+    achieved_error::Union{T,Nothing}=nothing,
+    exception::Union{Exception,Nothing}=nothing,
+    message::AbstractString) where {T<:AbstractFloat}
+    return FitAttemptReport{T}(
+        accepted,
+        kind,
+        ab,
+        n,
+        _mode_symbol(mode),
+        target,
+        achieved_error,
+        exception,
+        String(message))
+end
+
+"""
+        _try_fit(f, n, (a, b), scheme, mode; ...) -> (res, ok, report)
 
 Attempt to fit a degree-`n` polynomial on `[a, b]` to within `target`.
 
@@ -8,8 +46,8 @@ Returns:
 * `res` — the `OptimResult` (or a sentinel `nothing` if the inner driver
   threw and we could not produce one — `ok` is `false` in that case);
 * `ok`  — `true` iff `res.total_error ≤ target`;
-* `why` — a short string explaining a rejection (`"err > target"`, the
-  exception type, …) — used only for `verbose` and error messages.
+* `report` — a `FitAttemptReport` describing acceptance or rejection, used by
+    the piecewise recursion for verbose logging and error messages.
 
 Inner driver exceptions (`ConvergenceFailure`, `ExchangeFailure`,
 `DomainError` from the `RelativeMode` non-vanishing check, plus generic
@@ -39,16 +77,32 @@ function _try_fit(f, n::Int, ab::Tuple{T,T},
         if e isa InterruptException || e isa OutOfMemoryError
             rethrow()
         end
-        return (nothing, false, string(typeof(e)))
+        return (nothing, false, _fit_attempt_report(ab, n, mode, target;
+            accepted=false,
+            kind=:driver_exception,
+            exception=e,
+            message=string(typeof(e))))
     end
 
     if !isfinite(res.total_error)
-        return (res, false, "non-finite total_error")
+        return (res, false, _fit_attempt_report(ab, n, mode, target;
+            accepted=false,
+            kind=:non_finite_total_error,
+            achieved_error=res.total_error,
+            message="non-finite total_error"))
     end
     if res.total_error ≤ target
-        return (res, true, "ok")
+        return (res, true, _fit_attempt_report(ab, n, mode, target;
+            accepted=true,
+            kind=:accepted,
+            achieved_error=res.total_error,
+            message="ok"))
     end
-    return (res, false, "err > target")
+    return (res, false, _fit_attempt_report(ab, n, mode, target;
+        accepted=false,
+        kind=:target_miss,
+        achieved_error=res.total_error,
+        message="err > target"))
 end
 
 

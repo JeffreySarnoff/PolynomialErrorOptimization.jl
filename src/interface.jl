@@ -11,6 +11,135 @@ const _FIT_SCHEMES = (:horner, :horner_fma, :estrin, :estrin_fma)
 const _AUTO_STRATEGY = :auto
 
 """
+    ObjectiveSpec(mode, target)
+
+Typed objective description for a high-level fit plan.
+"""
+struct ObjectiveSpec{T<:AbstractFloat}
+    mode::Symbol
+    target::T
+    function ObjectiveSpec(mode::Symbol, target::T) where {T<:AbstractFloat}
+        @argcheck mode in _FIT_MODES ArgumentError(
+            "mode must be :abs or :rel, got :$mode")
+        @argcheck target > zero(T) ArgumentError(
+            "target must be > 0, got $target")
+        return new{T}(mode, target)
+    end
+end
+
+ObjectiveSpec(mode::Symbol, target::Real) = ObjectiveSpec(mode, float(target))
+
+"""
+    ComplexitySpec(; degree=nothing, max_coeffs=nothing, total_coeffs=0,
+                     piecewise=:auto, degree_policy=nothing)
+
+Typed complexity and partitioning description for a high-level fit plan.
+"""
+struct ComplexitySpec
+    degree::Union{Int,Nothing}
+    max_coeffs::Union{Int,Nothing}
+    total_coeffs::Int
+    piecewise::Union{Bool,Symbol}
+    degree_policy::Union{Symbol,Nothing}
+end
+
+function ComplexitySpec(; degree::Union{Integer,Nothing}=nothing,
+    max_coeffs::Union{Integer,Nothing}=nothing,
+    total_coeffs::Integer=0,
+    piecewise::Union{Bool,Symbol}=:auto,
+    degree_policy::Union{Symbol,Nothing}=nothing)
+    _validate_complexity_spec_inputs(
+        degree, max_coeffs, total_coeffs, piecewise, degree_policy)
+    return ComplexitySpec(
+        degree === nothing ? nothing : Int(degree),
+        max_coeffs === nothing ? nothing : Int(max_coeffs),
+        Int(total_coeffs),
+        piecewise,
+        degree_policy)
+end
+
+"""
+    PrecisionSpec(; target_type=Float64, compute_type=target_type)
+
+Typed precision description for a high-level fit plan.
+"""
+struct PrecisionSpec{TargetT<:AbstractFloat,ComputeT<:AbstractFloat}
+    target_type::Type{TargetT}
+    compute_type::Type{ComputeT}
+end
+
+function PrecisionSpec(; target_type::Type{TargetT}=Float64,
+    compute_type::Type{ComputeT}=target_type) where {TargetT<:AbstractFloat,ComputeT<:AbstractFloat}
+    return PrecisionSpec{TargetT,ComputeT}(target_type, compute_type)
+end
+
+"""
+    SearchSpec([compute_type=Float64]; scheme=:horner, effort=:balanced,
+               τ=nothing, max_depth=nothing, min_width=nothing,
+               driver_max_iter=nothing, strategy=nothing)
+
+Typed search and scheme description for a high-level fit plan.
+"""
+struct SearchSpec{T<:AbstractFloat}
+    scheme::Symbol
+    effort::Symbol
+    τ::Union{T,Nothing}
+    max_depth::Union{Int,Nothing}
+    min_width::Union{T,Nothing}
+    driver_max_iter::Union{Int,Nothing}
+    strategy::Union{SearchStrategy,Nothing}
+end
+
+SearchSpec(; kwargs...) = SearchSpec(Float64; kwargs...)
+
+function SearchSpec(::Type{T}; scheme::Symbol=:horner,
+    effort::Symbol=:balanced,
+    τ::Union{Real,Nothing}=nothing,
+    max_depth::Union{Integer,Nothing}=nothing,
+    min_width::Union{Real,Nothing}=nothing,
+    driver_max_iter::Union{Integer,Nothing}=nothing,
+    strategy::Union{SearchStrategy,Nothing}=nothing) where {T<:AbstractFloat}
+    _validate_search_spec_inputs(
+        scheme, effort, τ, max_depth, min_width, driver_max_iter)
+    return SearchSpec{T}(
+        scheme,
+        effort,
+        τ === nothing ? nothing : T(τ),
+        max_depth === nothing ? nothing : Int(max_depth),
+        min_width === nothing ? nothing : T(min_width),
+        driver_max_iter === nothing ? nothing : Int(driver_max_iter),
+        strategy)
+end
+
+"""
+    FitPlan
+
+Structured plan produced by `plan_fit`. It captures the typed problem
+specification, the executable `FitParameters`, and which choices were inferred
+from defaults rather than explicitly requested.
+"""
+struct FitPlan{TargetT<:AbstractFloat,ComputeT<:AbstractFloat,InferredT<:NamedTuple}
+    interval::Tuple{ComputeT,ComputeT}
+    objective::ObjectiveSpec{ComputeT}
+    complexity::ComplexitySpec
+    precision::PrecisionSpec{TargetT,ComputeT}
+    search::SearchSpec{ComputeT}
+    parameters
+    inferred::InferredT
+end
+
+function Base.show(io::IO, plan::FitPlan)
+    print(io, "FitPlan(",
+        "mode=:", plan.objective.mode,
+        ", target=", plan.objective.target,
+        ", interval=", plan.interval,
+        ", scheme=:", plan.search.scheme,
+        ", effort=:", plan.search.effort,
+        ", piecewise=", plan.complexity.piecewise,
+        ")")
+end
+
+"""
     FitParameters
 
 Concrete parameter bundle returned by `recommend_parameters` and accepted by
@@ -171,6 +300,77 @@ function recommend_parameters(f, I::Tuple{<:Real,<:Real};
 end
 
 """
+    plan_fit(f, I; kwargs...) -> FitPlan
+    plan_fit(f, I, objective::ObjectiveSpec; complexity=ComplexitySpec(),
+             precision=PrecisionSpec(), search=nothing) -> FitPlan
+
+Build a structured high-level fit plan without executing the solver.
+"""
+function plan_fit(f, I::Tuple{<:Real,<:Real};
+    target::Union{Real,Nothing}=nothing,
+    abs_tol::Union{Real,Nothing}=nothing,
+    rel_tol::Union{Real,Nothing}=nothing,
+    mode::Symbol=:abs,
+    effort::Symbol=:balanced,
+    degree::Union{Integer,Nothing}=nothing,
+    max_coeffs::Union{Integer,Nothing}=nothing,
+    total_coeffs::Integer=0,
+    piecewise::Union{Bool,Symbol}=:auto,
+    scheme::Symbol=:horner,
+    target_type::Type{<:AbstractFloat}=Float64,
+    compute_type::Type{<:AbstractFloat}=target_type,
+    τ::Union{Real,Nothing}=nothing,
+    max_depth::Union{Integer,Nothing}=nothing,
+    min_width::Union{Real,Nothing}=nothing,
+    driver_max_iter::Union{Integer,Nothing}=nothing,
+    strategy=nothing,
+    degree_policy::Union{Symbol,Nothing}=nothing)
+
+    params = recommend_parameters(f, I;
+        target=target, abs_tol=abs_tol, rel_tol=rel_tol,
+        mode=mode, effort=effort, degree=degree,
+        max_coeffs=max_coeffs, total_coeffs=total_coeffs,
+        piecewise=piecewise, scheme=scheme,
+        target_type=target_type, compute_type=compute_type,
+        τ=τ, max_depth=max_depth, min_width=min_width,
+        driver_max_iter=driver_max_iter, strategy=strategy,
+        degree_policy=degree_policy)
+
+    inferred = (
+        degree=degree === nothing,
+        max_coeffs=max_coeffs === nothing,
+        piecewise=piecewise === :auto,
+        τ=τ === nothing,
+        max_depth=max_depth === nothing,
+        min_width=min_width === nothing,
+        driver_max_iter=driver_max_iter === nothing,
+        strategy=strategy === nothing || strategy === _AUTO_STRATEGY,
+        degree_policy=degree_policy === nothing)
+    return _fit_plan(I, params, inferred)
+end
+
+function plan_fit(f, I::Tuple{<:Real,<:Real}, objective::ObjectiveSpec;
+    complexity::ComplexitySpec=ComplexitySpec(),
+    precision::PrecisionSpec=PrecisionSpec(),
+    search::Union{SearchSpec,Nothing}=nothing)
+    search_spec = search === nothing ? SearchSpec(precision.compute_type) :
+                  _convert_search_spec(search, precision.compute_type)
+    params = _parameters_from_specs(
+        f, I, objective, complexity, precision, search_spec)
+    inferred = (
+        degree=complexity.degree === nothing,
+        max_coeffs=complexity.max_coeffs === nothing,
+        piecewise=complexity.piecewise === :auto,
+        τ=search_spec.τ === nothing,
+        max_depth=search_spec.max_depth === nothing,
+        min_width=search_spec.min_width === nothing,
+        driver_max_iter=search_spec.driver_max_iter === nothing,
+        strategy=search_spec.strategy === nothing,
+        degree_policy=complexity.degree_policy === nothing)
+    return _fit_plan(I, params, inferred)
+end
+
+"""
     fit(f, I; kwargs...) -> Approximation
 
 High-level approximation interface. This unexported function calls
@@ -191,6 +391,8 @@ function fit(f, I::Tuple{<:Real,<:Real}; kwargs...)
     return fit(f, I, params)
 end
 
+fit(f, plan::FitPlan) = fit(f, plan.interval, plan.parameters)
+
 """
     approxfit(f, I; kwargs...) -> Approximation
     approxfit(f, I, params::FitParameters) -> Approximation
@@ -204,6 +406,8 @@ approxfit(f, I::Tuple{<:Real,<:Real}; kwargs...) =
 
 approxfit(f, I::Tuple{<:Real,<:Real}, params::FitParameters) =
     fit(f, I, params)
+
+approxfit(f, plan::FitPlan) = fit(f, plan)
 
 """
     fit(f, I, params::FitParameters) -> Approximation
@@ -391,6 +595,38 @@ function _validate_recommendation_inputs(
         "max_coeffs must be ≥ 1, got $max_coeffs")
 end
 
+function _validate_complexity_spec_inputs(
+    degree, max_coeffs, total_coeffs, piecewise, degree_policy)
+    @argcheck piecewise === :auto || piecewise isa Bool ArgumentError(
+        "piecewise must be true, false, or :auto, got $piecewise")
+    @argcheck total_coeffs ≥ 0 ArgumentError(
+        "total_coeffs must be ≥ 0, got $total_coeffs")
+    @argcheck !(degree !== nothing && max_coeffs !== nothing) ArgumentError(
+        "pass at most one of degree or max_coeffs")
+    degree !== nothing && @argcheck degree ≥ 0 ArgumentError(
+        "degree must be ≥ 0, got $degree")
+    max_coeffs !== nothing && @argcheck max_coeffs ≥ 1 ArgumentError(
+        "max_coeffs must be ≥ 1, got $max_coeffs")
+    degree_policy !== nothing && @argcheck degree_policy in (:max, :min, :min_cost) ArgumentError(
+        "degree_policy must be :max, :min, or :min_cost; got :$degree_policy")
+end
+
+function _validate_search_spec_inputs(
+    scheme, effort, τ, max_depth, min_width, driver_max_iter)
+    @argcheck scheme in _FIT_SCHEMES ArgumentError(
+        "scheme must be :horner, :horner_fma, :estrin, or :estrin_fma, got :$scheme")
+    @argcheck effort in _FIT_EFFORTS ArgumentError(
+        "effort must be :fast, :balanced, or :accurate, got :$effort")
+    τ !== nothing && @argcheck τ > 0 ArgumentError(
+        "τ must be > 0, got $τ")
+    max_depth !== nothing && @argcheck max_depth ≥ 0 ArgumentError(
+        "max_depth must be ≥ 0, got $max_depth")
+    min_width !== nothing && @argcheck min_width ≥ 0 ArgumentError(
+        "min_width must be ≥ 0, got $min_width")
+    driver_max_iter !== nothing && @argcheck driver_max_iter ≥ 0 ArgumentError(
+        "driver_max_iter must be ≥ 0, got $driver_max_iter")
+end
+
 function _choose_degree_budget(degree, max_coeffs, piecewise, defaults, profile)
     chosen_degree = degree === nothing ? nothing : Int(degree)
     chosen_max_coeffs = max_coeffs === nothing ? nothing : Int(max_coeffs)
@@ -407,6 +643,86 @@ function _choose_degree_budget(degree, max_coeffs, piecewise, defaults, profile)
     end
 
     return chosen_degree, chosen_max_coeffs, chosen_piecewise
+end
+
+function _parameters_from_specs(f, I::Tuple{<:Real,<:Real},
+    objective::ObjectiveSpec,
+    complexity::ComplexitySpec,
+    precision::PrecisionSpec{TargetT,ComputeT},
+    search::SearchSpec{ComputeT}) where {TargetT<:AbstractFloat,ComputeT<:AbstractFloat}
+    _validate_recommendation_inputs(
+        I, objective.mode, search.effort, complexity.piecewise,
+        search.scheme, complexity.degree, complexity.max_coeffs,
+        complexity.total_coeffs)
+
+    profile = _sample_profile(f, I, ComputeT)
+    if objective.mode === :rel && profile.crosses_zero
+        throw(DomainError(I,
+            "relative mode requires f to stay away from zero on sampled points; " *
+            "use mode=:abs or a relative-zero expert driver for known zeros"))
+    end
+
+    defaults = _effort_defaults(search.effort)
+    chosen_degree, chosen_max_coeffs, chosen_piecewise =
+        _choose_degree_budget(
+            complexity.degree, complexity.max_coeffs,
+            complexity.piecewise, defaults, profile)
+    chosen_max_depth = _choose_max_depth(
+        search.max_depth, defaults, search.effort, profile)
+
+    return FitParameters(
+        ComputeT(objective.target),
+        objective.mode,
+        chosen_degree,
+        chosen_max_coeffs,
+        complexity.total_coeffs,
+        chosen_piecewise,
+        search.scheme,
+        precision.target_type,
+        precision.compute_type,
+        _eval_scheme_for_scheme(search.scheme),
+        _eval_op_for_scheme(search.scheme),
+        search.effort,
+        ComputeT(search.τ === nothing ? defaults.τ : search.τ),
+        chosen_max_depth,
+        ComputeT(search.min_width === nothing ? defaults.min_width : search.min_width),
+        Int(search.driver_max_iter === nothing ? defaults.driver_max_iter : search.driver_max_iter),
+        search.strategy,
+        complexity.degree_policy === nothing ? defaults.degree_policy : complexity.degree_policy)
+end
+
+function _convert_search_spec(search::SearchSpec, ::Type{T}) where {T<:AbstractFloat}
+    return SearchSpec(T;
+        scheme=search.scheme,
+        effort=search.effort,
+        τ=search.τ,
+        max_depth=search.max_depth,
+        min_width=search.min_width,
+        driver_max_iter=search.driver_max_iter,
+        strategy=search.strategy)
+end
+
+function _fit_plan(I, params::FitParameters{TargetT,ComputeT}, inferred) where {TargetT<:AbstractFloat,ComputeT<:AbstractFloat}
+    interval = (ComputeT(I[1]), ComputeT(I[2]))
+    objective = ObjectiveSpec(params.mode, params.target)
+    complexity = ComplexitySpec(
+        degree=params.degree,
+        max_coeffs=params.max_coeffs,
+        total_coeffs=params.total_coeffs,
+        piecewise=params.piecewise,
+        degree_policy=params.degree_policy)
+    precision = PrecisionSpec(
+        target_type=params.target_type,
+        compute_type=params.compute_type)
+    search = SearchSpec(ComputeT;
+        scheme=params.scheme,
+        effort=params.effort,
+        τ=params.τ,
+        max_depth=params.max_depth,
+        min_width=params.min_width,
+        driver_max_iter=params.driver_max_iter,
+        strategy=params.strategy)
+    return FitPlan(interval, objective, complexity, precision, search, params, inferred)
 end
 
 function _profile_coeff_bonus(profile)

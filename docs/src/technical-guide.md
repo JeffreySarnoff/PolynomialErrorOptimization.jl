@@ -2,6 +2,9 @@
 
 This guide is for contributors and advanced users who need implementation-level detail.
 
+For contributor workflow and the staged redesign plan, see
+[Contributor Guide](contributor-guide.md).
+
 ## 1. Architecture overview
 
 The package is organized around a small set of core abstractions:
@@ -34,7 +37,8 @@ High-level flow:
 - `src/exchange/solve_primal.jl`: primal solve in each mode.
 - `src/exchange/find_new_index.jl`: worst-case point search and signatures.
 - `src/exchange/exchange.jl`: exchange pivot logic, update step, and `ExchangeFailure`.
-- `src/exchange/driver.jl`: top-level fixed-degree optimization APIs, `OptimResult`, and `ConvergenceFailure`.
+- `src/exchange/driver.jl`: top-level fixed-degree optimization APIs,
+  `OptimResult`, basis metadata helpers, and `ConvergenceFailure`.
 - `src/piecewise/`: adaptive piecewise and budget-aware drivers split by type/config/fitting/bisection policy.
 - `src/provide.jl`: standalone evaluator source generation for exporting approximations.
 - `src/interface.jl`: high-level `approxfit`/recommendation wrapper over the expert APIs.
@@ -53,6 +57,8 @@ High-level flow:
 - fixed-degree APIs require `scheme.n == n`
 - fixed-degree internal arithmetic uses `fptype(scheme)`
 - returned polynomial coefficients use the requested `target_type`
+- `OptimResult.poly` is always monomial-basis even when `RelativeZeroMode`
+  solves in a shifted basis
 - interval must satisfy `I[1] < I[2]`
 - `τ > 0`
 - iteration bounds and depth/budget parameters are nonnegative
@@ -148,6 +154,9 @@ using Pkg
 Pkg.test()
 ```
 
+The test suite is split by subsystem under `test/core/`, `test/schemes/`,
+`test/exchange/`, `test/piecewise/`, and `test/interface/`.
+
 Suggested contributor checks:
 
 1. run full tests after algorithm or config-struct changes,
@@ -161,7 +170,7 @@ Suggested contributor checks:
 
 1. add a subtype of `SearchStrategy` in `src/exchange/search.jl`,
 2. implement `locate_maximum` dispatch in `src/exchange/search.jl`,
-3. add tests in `test/runtests.jl`,
+3. add tests in `test/exchange/`,
 4. update user docs with when to use it.
 
 ### Add a new solve policy
@@ -174,7 +183,7 @@ Suggested contributor checks:
 
 1. ensure `EvalScheme` invariants are met,
 2. validate `pi_i` output dimensions,
-3. add end-to-end driver tests at multiple degrees.
+3. add end-to-end driver tests in `test/schemes/` and `test/exchange/` at multiple degrees.
 
 ## 11. Related implementation notes
 

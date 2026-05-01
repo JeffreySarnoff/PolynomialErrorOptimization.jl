@@ -20,7 +20,7 @@ It returns the cheaper alternative. α–β pruning is used: the second half
 is only computed if the first half's cost leaves room to beat
 `cost_accept`.
 
-`fit_at_degree(a, b, d)` must return the same `(res, ok, why)` triple as
+`fit_at_degree(a, b, d)` must return the same `(res, ok, report)` triple as
 `_try_fit`. The function does not need to know about `target`/`τ`/
 `driver_max_iter` — those are baked into the closure.
 """
@@ -57,15 +57,18 @@ function _bisect_min_cost(fit_at_degree,
         # ---- (1) Find the cheapest accepting degree on [a, b] ----
         accept_res::Union{OptimResult{TargetT,T},Nothing} = nothing
         accept_cost::Int = INF
-        last_why::String = "no degree attempted"
+        last_report = _fit_attempt_report((a, b), max_n, mode, target;
+            accepted=false,
+            kind=:no_degree_attempted,
+            message="no degree attempted")
         for d in 0:max_n
-            res, ok, why = fit_at_degree(a, b, d)
+            res, ok, report = fit_at_degree(a, b, d)
             if ok
                 accept_res = res
                 accept_cost = d + 1
                 break
             end
-            last_why = why
+            last_report = report
         end
 
         # ---- (2) Decide whether we can bisect ----
@@ -79,7 +82,7 @@ function _bisect_min_cost(fit_at_degree,
                 error("approximate ($mode_label, :min_cost): could not reach " *
                       "target = $target on subinterval [$a, $b] within " *
                       "max_depth = $max_depth / min_width = $min_width " *
-                      "(reason: $last_why).")
+                      "(reason: $last_report).")
             end
             if accept_cost > cap
                 return (ApproxPiece{TargetT,T}[], INF)
@@ -172,7 +175,7 @@ function _bisect_min_cost(fit_at_degree,
         if accept_res === nothing && bisect_cost == INF
             error("approximate ($mode_label, :min_cost): could not reach " *
                   "target = $target on subinterval [$a, $b] within " *
-                  "max_depth = $max_depth (reason: $last_why).")
+                  "max_depth = $max_depth (reason: $last_report).")
         end
         return (ApproxPiece{TargetT,T}[], INF)
     end

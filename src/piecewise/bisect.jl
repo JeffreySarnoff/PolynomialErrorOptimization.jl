@@ -3,11 +3,12 @@
             total_coeffs, verbose) -> PiecewisePolyApprox
 
 Generic adaptive-bisection loop. `fitter(a, b)` must return a 3-tuple
-`(res, ok, why)` matching the contract of `_try_fit`:
+`(res, ok, report)` matching the contract of `_try_fit`:
 
 * `res::OptimResult` (or `nothing` if the inner driver threw),
 * `ok::Bool` — `true` iff this piece is accepted,
-* `why::AbstractString` — short rejection reason for `verbose`/error messages.
+* `report::FitAttemptReport` — structured attempt diagnostics for
+    `verbose` and error messages.
 
 The fitter is the only mode-specific part; everything else (budget checks,
 left-to-right ordering, worst-error aggregation) lives here.
@@ -43,7 +44,7 @@ function _bisect(fitter,
         a, b, depth = cur.a, cur.b, cur.depth
         width = b - a
 
-        res, ok, why = fitter(a, b)
+        res, ok, report = fitter(a, b)
 
         if ok
             piece_cost = length(Polynomials.coeffs(res.poly))
@@ -68,23 +69,23 @@ function _bisect(fitter,
         if depth ≥ max_depth
             error("approximate ($mode_label): could not reach target = $target on " *
                   "subinterval [$a, $b] within max_depth = $max_depth " *
-                  "(reason: $why).")
+                  "(reason: $report).")
         end
         if width ≤ 2 * min_width
             error("approximate ($mode_label): could not reach target = $target on " *
                   "subinterval [$a, $b]; bisection would produce pieces " *
-                  "narrower than min_width = $min_width (reason: $why).")
+                  "narrower than min_width = $min_width (reason: $report).")
         end
 
         verbose && println("bisect  [", a, ", ", b,
-            "]  reason = ", why,
+            "]  reason = ", report,
             "  depth = ", depth)
 
         mid = (a + b) / 2
         if mid ≤ a || mid ≥ b
             error("approximate ($mode_label): could not reach target = $target on " *
                   "subinterval [$a, $b]; midpoint is not representable " *
-                  "(reason: $why).")
+                  "(reason: $report).")
         end
 
         push!(stack, PendingInterval{T}(mid, b, depth + 1))

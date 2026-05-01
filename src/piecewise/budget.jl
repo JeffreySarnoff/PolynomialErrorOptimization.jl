@@ -231,18 +231,22 @@ function _approximate_budget(f, max_coeffs::Int,
         # attempt's result so the bisection logger has something
         # informative.
         fitter = function (a, b)
-            last_res, last_why = nothing, "no degree attempted"
+            last_res = nothing
+            last_report = _fit_attempt_report((a, b), max_n, mode, target;
+                accepted=false,
+                kind=:no_degree_attempted,
+                message="no degree attempted")
             degrees = degree_policy === :max ? (max_n:max_n) : (0:max_n)
             for d in degrees
-                res, ok, why = fit_at_degree(a, b, d)
+                res, ok, report = fit_at_degree(a, b, d)
                 if ok
                     verbose && degree_policy === :min && println(
                             "        accepted at degree d = ", d)
-                    return (res, true, why)
+                    return (res, true, report)
                 end
-                last_res, last_why = res, why
+                last_res, last_report = res, report
             end
-            return (last_res, false, last_why)
+            return (last_res, false, last_report)
         end
 
         return _bisect(fitter, I, bisect_cfg)

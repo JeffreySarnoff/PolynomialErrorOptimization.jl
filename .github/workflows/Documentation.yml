@@ -27,6 +27,11 @@ jobs:
 
             - uses: julia-actions/cache@v2
 
+            - uses: julia-actions/julia-buildpkg@v1
+
+            - name: Run docs smoke tests
+              run: julia --color=yes --project=. -e 'include("test/common.jl"); include("test/docs/docs_tests.jl")'
+
             - name: Install dependencies
               shell: julia --color=yes --project=docs {0}
               run: |

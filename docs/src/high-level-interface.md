@@ -1,13 +1,16 @@
 # High-Level Interface
 
-The high-level interface is for the common question:
+This is the stable workflow layer. Use it for the common question:
 
 > Approximate this function on this interval to this tolerance, optionally
 > under a coefficient budget.
 
-It is built on top of the expert APIs. Use it first, then drop down to
-`eval_approx_optimize`, `approximate_abs`, or `approximate_abs_budget` when
-you need full control.
+It is built on top of the expert APIs. Stay here unless you specifically need:
+
+- a fixed evaluation scheme and explicit search strategy,
+- direct access to the exchange loop,
+- piecewise degree-policy control,
+- symbolic custom evaluation-error models.
 
 ## Minimal Inputs
 
@@ -16,7 +19,7 @@ The minimal call is:
 ```julia
 using PolynomialErrorOptimization
 
-approx = approxfit(sin, (-3.0, 3.0); target = 1e-8)
+approx = approxfit(sin, (-3.0, 3.0); target = 1e-3, effort = :fast, max_depth = 6)
 ```
 
 You provide:
@@ -50,6 +53,8 @@ For `mode = :abs`, `rel_tol` is converted to an absolute target by sampling
 the scale of `f` on `I`.
 
 ## Common Workflows
+
+Before choosing keywords, see [Choosing a Workflow](choosing-a-workflow.md) for the capability matrix.
 
 ### Let the package choose a coefficient budget
 
@@ -215,6 +220,62 @@ tolerance. Optional hints are:
 That sampling is used to convert `rel_tol` in absolute mode, modestly raise
 piecewise defaults for harder intervals, and reject relative-mode requests
 whose sampled values cross or touch zero.
+
+## Planning Before Execution
+
+Use `plan_fit` when you want a structured plan object instead of just the
+flattened `FitParameters` bundle.
+
+### Keyword-driven planning
+
+```julia
+plan = plan_fit(sin, (-3.0, 3.0);
+    target = 1e-3,
+    effort = :fast,
+    max_depth = 6)
+
+approx = approxfit(sin, plan)
+```
+
+`FitPlan` records:
+
+- the normalized interval,
+- the typed objective,
+- complexity, precision, and search specs,
+- the executable `FitParameters`,
+- which fields were inferred from defaults.
+
+### Typed planning objects
+
+Use the typed specs when the workflow should be explicit about intent rather
+than expressed as a keyword bundle.
+
+```julia
+objective = ObjectiveSpec(:rel, 1e-8)
+complexity = ComplexitySpec(degree = 5, piecewise = false)
+precision = PrecisionSpec(target_type = Float32, compute_type = BigFloat)
+search = SearchSpec(BigFloat;
+    scheme = :horner_fma,
+    effort = :fast,
+    τ = 1e-3,
+    max_depth = 8,
+    driver_max_iter = 80,
+    strategy = PolynomialErrorOptimization.GridSearch(4096))
+
+plan = plan_fit(exp, (0.5, 1.5), objective;
+    complexity = complexity,
+    precision = precision,
+    search = search)
+
+approx = approxfit(exp, plan)
+```
+
+The keyword path and the typed path are equivalent front doors into the same
+planning model. Use keywords for quick iteration and typed specs when the
+problem definition should be explicit, inspectable, and easy to persist.
+
+If you want to choose the workflow before choosing the parameters, start with
+[Choosing a Workflow](choosing-a-workflow.md).
 
 ## Effort Presets
 

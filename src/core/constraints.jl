@@ -77,17 +77,17 @@ end
     α_rel(ω::Index{T}, scheme::EvalScheme{T}, f) -> Vector{T}
 
 Constraint row for the (P^rel) formulation: identical to `α` except the first
-component is `f(t)` instead of `1.0`.
+component is `|f(t)|` instead of `1.0`.
 """
 function α_rel(ω::Index{T}, scheme::EvalScheme{T}, f) where T<:AbstractFloat
     out = α(ω, scheme)
-    out[1] = T(f(ω.t))
+    out[1] = abs(T(f(ω.t)))
     return out
 end
 
 function α_rel!(out::AbstractVector{T}, ω::Index{T}, scheme::EvalScheme{T}, f) where T<:AbstractFloat
     α!(out, ω, scheme)
-    out[1] = T(f(ω.t))
+    out[1] = abs(T(f(ω.t)))
     return out
 end
 

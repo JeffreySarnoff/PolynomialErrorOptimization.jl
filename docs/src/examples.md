@@ -1,7 +1,7 @@
-# Examples
+# Recipes
 
-This page collects worked examples for common approximation tasks, with
-special focus on constrained workflows for `cos` and `acos`.
+This page collects worked recipes for common approximation tasks, with special
+focus on constrained workflows for `cos` and `acos`.
 
 ## 0. Start with the high-level interface
 
@@ -24,11 +24,28 @@ When you need explicit control, use the lower-level examples below.
 This section shows practical API patterns for developing approximations with
 different constraints.
 
-### 1.1 cos: fixed degree, absolute objective
+The expert APIs used below are available from the module but intentionally not
+exported from the root namespace. Start expert workflows with explicit imports:
 
 ```julia
 using PolynomialErrorOptimization
 
+import PolynomialErrorOptimization: eval_approx_optimize,
+    eval_approx_optimize_relative,
+    eval_approx_optimize_relative_zero,
+    approximate,
+    approximate_abs,
+    approximate_abs_budget,
+    GridSearch,
+    GridThenLocal,
+    GridThenOptim,
+    basis_info,
+    solution_coefficients
+```
+
+### 1.1 cos: fixed degree, absolute objective
+
+```julia
 f = cos
 n = 6
 I = (-2.0, 2.0)
@@ -127,7 +144,39 @@ res_acos_rel = eval_approx_optimize_relative(f, n, I_rel, scheme;
 @show res_acos_rel.total_error
 ```
 
-### 1.6 acos: budget-constrained piecewise approximation
+### 1.6 relative-zero fixed-degree workflow
+
+Use `eval_approx_optimize_relative_zero` when the zero location and order are
+known ahead of time.
+
+```julia
+res_rz = eval_approx_optimize_relative_zero(
+    t -> t * exp(t),
+    4,
+    (-0.35, 1.1),
+    horner_scheme(4; u = 2.0^-53);
+    t_z = 0.0,
+    s = 1,
+    τ = 1e-2,
+    max_iter = 20,
+    strategy = GridSearch(4097))
+
+info = basis_info(res_rz)
+coeffs = solution_coefficients(res_rz)
+
+@show res_rz.total_error
+@show res_rz.iterations
+@show info.zero_order
+@show info.solution_basis
+@show coeffs
+@show res_rz.poly
+```
+
+This recipe uses a deterministic grid and a known simple zero at the origin.
+For nonzero `t_z`, inspect `basis_info(res_rz)` and
+`solution_coefficients(res_rz)` before exporting coefficients.
+
+### 1.7 acos: budget-constrained piecewise approximation
 
 Use this when you need hard limits on per-piece and total polynomial cost.
 
@@ -153,7 +202,7 @@ Constraints shown here:
 - global cap via `total_coeffs = 140`
 - global optimization policy via `degree_policy = :min_cost`
 
-### 1.7 Unified API pattern for cos and acos
+### 1.8 Unified API pattern for cos and acos
 
 If you prefer one entry point, use `approximate`:
 
@@ -177,7 +226,7 @@ pa_acos_u = approximate(acos, (-0.98, 0.98);
     strategy = GridSearch(5001))
 ```
 
-### 1.8 Separate target and computation types
+### 1.9 Separate target and computation types
 
 Use `target_type` to choose the coefficient type returned by the fit and the
 floating-point format modeled by the default evaluation-error scheme. Use
@@ -213,7 +262,7 @@ approx32_64 = approxfit(cos, (-1.0, 1.0);
 
 Julia's built-in 32-bit floating type is spelled `Float32`.
 
-### 1.9 FMA Horner fitting and evaluation
+### 1.10 FMA Horner fitting and evaluation
 
 Use `scheme = :horner_fma` when your deployed evaluator will use explicit
 fused multiply-add Horner steps. This changes the optimization error model; it
@@ -246,7 +295,7 @@ src_res_fma = provide_source(res_fma;
     eval_op = :fma)
 ```
 
-### 1.10 FMA Estrin fitting and evaluation
+### 1.11 FMA Estrin fitting and evaluation
 
 Use `scheme = :estrin_fma` when your deployed evaluator will use Estrin
 grouping with explicit fused multiply-add affine combines. This preserves the
@@ -298,6 +347,7 @@ dependency on `PolynomialErrorOptimization` or `Polynomials` at runtime.
 
 ```julia
 using PolynomialErrorOptimization
+import PolynomialErrorOptimization: approximate_abs, eval_approx_optimize
 
 pa = approximate_abs(cos, 4, (-3.0, 3.0), horner_scheme(4; u = 2.0^-53);
     target = 1e-8,

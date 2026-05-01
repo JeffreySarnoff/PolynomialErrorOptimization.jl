@@ -15,13 +15,11 @@ linearised model of finite-precision evaluation error:
     min_{a ∈ ℝⁿ⁺¹}   max_{t ∈ I}  ( |f(t) − p(t)|  +  θ(a, t) ),
     where p(t) = Σⱼ aⱼ tʲ.
 
-The user-facing entry points are:
+The recommended user-facing entry points are:
 
-* `eval_approx_optimize`              — the absolute-error driver (Algorithm 3).
-* `eval_approx_optimize_relative`     — the (P^rel) variant when `f` does
-                                         not vanish on `I` (Section 5).
-* `eval_approx_optimize_relative_zero` — the (P^rel2) variant when `f` has
-                                         a zero of finite order in `I`.
+* `approxfit`                         — the stable high-level workflow.
+* `fit_abs`, `fit_rel`               — mode-specific stable wrappers.
+* `plan_fit` and `recommend_parameters` — explicit planning helpers.
 
 Convenience evaluation-scheme builders:
 
@@ -85,25 +83,9 @@ include("interface.jl")
 # Public API
 # ---------------------------------------------------------------------------
 
-# Core types
-export Index, Signature, EvalScheme, OptimResult,
-    AbstractMode, AbsoluteMode, RelativeMode, RelativeZeroMode,
-    SearchStrategy, GridSearch, GridThenLocal, GridThenOptim
-
-# Top-level drivers (paper Algorithm 3 + Section 5)
-export eval_approx_optimize,
-    eval_approx_optimize_relative,
-    eval_approx_optimize_relative_zero
-
-# Adaptive piecewise approximation (built on the drivers above)
-export approximate,
-    approximate_abs, approximate_rel,
-    approximate_abs_budget, approximate_rel_budget,
-    default_scheme_builder,
-    PiecewisePolyApprox, ApproxPiece
-
 # High-level convenience interface
-export approxfit, fit_abs, fit_rel, recommend_parameters,
+export approxfit, fit_abs, fit_rel, recommend_parameters, plan_fit,
+    ObjectiveSpec, ComplexitySpec, PrecisionSpec, SearchSpec, FitPlan,
     FitParameters, Approximation,
     error_bound, coeff_count, is_piecewise, pieces
 
@@ -113,17 +95,5 @@ export provide_source, provide, provide_file
 # Built-in evaluation schemes
 export horner_scheme, fma_horner_scheme, estrin_scheme, fma_estrin_scheme,
     horner_eval, fma_horner_eval, estrin_eval, fma_estrin_eval
-
-# Lower-level building blocks (paper Algorithms 4–7)
-export init_points, solve_primal, find_new_index, exchange
-
-# Symbolic evaluation-error machinery (paper Algorithm 2)
-export ErrExpr, VarT, VarA, Const, Neg, Add, Mul, FMA, Round,
-    lin_eval_error, build_eval_scheme,
-    collect_rounding_us, horner_expr, fma_horner_expr, estrin_expr,
-    fma_estrin_expr
-
-# Exceptions
-export ExchangeFailure, ConvergenceFailure
 
 end # module PolynomialErrorOptimization
