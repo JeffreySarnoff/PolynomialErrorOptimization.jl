@@ -147,11 +147,55 @@ basis for evaluation and source generation.
 
 ## 4. Choosing a search strategy
 
-Available strategies:
+In each exchange iteration the algorithm must locate the worst-case point
+`tstar` — the point in the interval where the error objective is largest.
+All three strategies start with the same coarse equispaced grid scan and
+differ only in whether and how they refine that result.
 
-- `GridSearch(M)`: robust, deterministic baseline.
-- `GridThenLocal(M; bracket=3)`: grid plus local bounded refinement.
-- `GridThenOptim(M; bracket=3)`: grid plus `Optim.Brent()` refinement.
+### `GridSearch(M)`
+
+Evaluates the error objective at `M` equally spaced points across the
+interval and returns the grid point with the highest value.  No subsequent
+refinement is performed.  Cost is exactly `M` objective evaluations per
+exchange iteration.
+
+- **Accuracy**: limited by grid spacing — error peaks narrower than one grid
+  cell may be missed or underestimated.
+- **Speed**: fastest; a single pass, no branches, no external optimizer.
+- **When to use**: default starting point, reproducibility required, or when
+  the error objective is smooth enough that grid density suffices.
+
+### `GridThenLocal(M; bracket=3)`
+
+Runs the same `M`-point grid scan, then performs a golden-section
+maximization within a window of `±bracket` grid cells centred on the best
+grid point.  The golden-section pass refines the location of the local peak
+without extra grid evaluations.  Total cost is `M` objective evaluations plus
+approximately 200 golden-section iterations within a narrow sub-interval —
+roughly a 5–10 % wall-time increase over `GridSearch` at the same `M`.
+
+- **Accuracy**: reliably better than `GridSearch` near smooth, single-peaked
+  local maxima; rarely helps when the peak straddles multiple grid cells.
+- **Speed**: low overhead; the refinement window is tiny and has no
+  external dependencies.
+- **When to use**: objective is mostly smooth and you want modest localization
+  improvement without depending on `Optim.jl`.
+
+### `GridThenOptim(M; bracket=3)`
+
+Same grid scan followed by bounded Brent's method (`Optim.Brent()`) over the
+`±bracket` window.  Brent's method combines parabolic interpolation with
+golden-section bracketing and typically reaches tighter precision than
+pure golden-section at the same number of function evaluations.
+
+- **Accuracy**: sharpest localization of the three; parabolic interpolation
+  accelerates convergence near smooth peaks.
+- **Speed**: comparable to `GridThenLocal`; in practice 5–15 % slower than
+  `GridSearch` at the same `M`, but often allows a smaller `M`, which more
+  than compensates.
+- **When to use**: error peaks are sharp, precise `tstar` localization
+  noticeably reduces total exchange iteration count, and `Optim.jl` is
+  acceptable.
 
 Example:
 
@@ -162,13 +206,80 @@ res = eval_approx_optimize(f, n, I, scheme; strategy = strategy)
 
 Guidance:
 
-- Start with `GridSearch` for reproducibility.
-- Move to `GridThenOptim` when tighter max-point localization helps convergence.
-- Increase `M` before increasing `bracket`.
+- Start with `GridSearch` for reproducibility and fast iteration.
+- Move to `GridThenLocal` or `GridThenOptim` when convergence stalls or you
+  need sharper worst-case localization to reduce total iteration count.
+- Increase `M` before increasing `bracket`: a denser grid improves the
+  quality of the initial scan that both refinement methods depend on.
+- `bracket = 3` (default) is almost always enough; `bracket = 4` or `5`
+  helps only when the optimal point falls near the boundary of its grid cell.
 
 ## 5. Piecewise adaptive approximation
 
-Use this when one global degree is insufficient or expensive.
+Use this when one global degree is insufficient or expensive.  The adaptive
+driver bisects the interval recursively until each piece meets the per-piece
+`target` or a structural limit (`max_depth`, `min_width`, `total_coeffs`) is
+reached.
+
+### Key parameters
+
+- **`max_depth`**: maximum bisection recursion depth.  After `max_depth`
+  halvings the narrowest possible piece has width `(b - a) / 2^max_depth`.
+  Increase when the function has localized difficulty (for example a steep
+  gradient or a near-singularity in a subinterval) that requires many
+  bisections to resolve.  Typical starting values: `24` to `30`.
+
+- **`min_width`**: minimum permitted piece width.  Bisection stops and the
+  piece is rejected when the sub-interval falls below this floor, regardless
+  of whether `target` is met.  Use `0.0` (default) to disable the floor;
+  add a floor such as `1e-5` to `1e-3` to prevent over-fragmentation in
+  near-singular or steeply varying regions.
+
+- **`total_coeffs`**: global coefficient count cap summed over all accepted
+  pieces.  `0` disables the cap.  A positive value enforces a hard model-size
+  budget: the driver returns a partial result once the cumulative count would
+  exceed this limit.  Fixed-degree pieces each cost exactly `n + 1`
+  coefficients; budget-mode pieces cost between `1` and `max_coeffs`.
+
+- **`degree_policy`** *(budget mode only)*: selects how the per-piece
+  polynomial degree is chosen when a range of degrees is permitted.
+  - `:max` — always attempt the highest permitted degree.  Fewest pieces,
+    highest per-piece cost; simplest behaviour.
+  - `:min` — use the smallest degree that meets `target` locally.  Locally
+    sparse pieces; may use more pieces overall.
+  - `:min_cost` — recursively minimizes total coefficient count using a
+    branch-and-bound strategy.  Best global coefficient efficiency; highest
+    per-piece computation cost.  Prefer when coefficient budget is the
+    primary constraint.
+
+- **`driver_max_iter`**: maximum number of inner exchange iterations allowed
+  per piece.  If a single piece cannot converge within this budget it is
+  bisected instead.  Too small forces unnecessary bisections; too large wastes
+  time on genuinely hard pieces.  Start at `100`; increase to `150`–`300`
+  for tighter targets or difficult functions.
+
+- **`scheme`**: the `EvalScheme` that defines the polynomial evaluation model
+  and the evaluation-error rows used during optimization.  The scheme must
+  match the polynomial degree `n` (or `max_coeffs - 1` in budget mode).
+  - `horner_scheme(n; u)` — standard Horner evaluation; best general default.
+  - `fma_horner_scheme(n; u)` — Horner with fused multiply-add; use when
+    the deployed evaluator will use FMA instructions.
+  - `estrin_scheme(n; u)` — Estrin (pairwise) evaluation; for parallel or
+    SIMD targets.
+  The `u` parameter is the unit roundoff of the target floating-point type
+  (typically `2.0^-53` for `Float64`, `2.0^-24` for `Float32`).
+
+### Parameter interactions
+
+- `max_depth` and `min_width` are complementary hard stops: a piece is
+  rejected when either limit is hit before `target` is met.  Keep them
+  consistent: `min_width` should be larger than `(b - a) / 2^max_depth`;
+  otherwise `max_depth` is never the binding constraint.
+- Tightening `target` while holding `driver_max_iter` fixed can cause
+  increased bisection; raise `driver_max_iter` together with `target`.
+- `total_coeffs` interacts with `degree_policy`: `:min_cost` is best at
+  staying under a coefficient budget; `:max` is most likely to exhaust it
+  quickly.
 
 ### Fixed degree per piece
 

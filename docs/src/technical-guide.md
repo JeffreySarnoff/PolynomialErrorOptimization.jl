@@ -9,19 +9,60 @@ For contributor workflow and the staged redesign plan, see
 
 The package is organized around a small set of core abstractions:
 
-- `EvalScheme`: linearized evaluation-error model rows `pi_i(t)`.
-- exchange-loop state: discretization points/signatures plus primal/dual values.
-- mode tags: absolute, relative, relative-with-zero.
-- strategy layer: max-search policy used by `find_new_index`.
+- **`EvalScheme`**: the evaluation-error model for a specific polynomial
+  evaluation scheme (Horner, Estrin, FMA variants).  Encapsulates degree `n`,
+  error row count `k`, and functions `pi_i(t)` that produce the constraint row
+  vectors fed to the linear solver in each exchange iteration.  Changing the
+  scheme changes what the optimizer certifies: errors in Horner evaluation
+  differ from errors in Estrin evaluation at the same floating-point precision.
+
+- **exchange-loop state**: the active working set of `n + 2` discretization
+  points (called "indices"), together with their alternation signatures (sign
+  pattern used by the dual equioscillation certificate), plus the current
+  primal coefficient vector and the dual equioscillation level.  The exchange
+  algorithm maintains and updates this state on every iteration: one old index
+  leaves the set and the new worst-case point `tstar` enters.
+
+- **mode tags** (`AbsoluteMode`, `RelativeMode`, `RelativeZeroMode`): type
+  tags that dispatch constraint-row construction and worst-case search to the
+  appropriate error formulation.
+  - `AbsoluteMode`: minimizes `max |f(t) - p(t)|` directly.
+  - `RelativeMode`: minimizes `max |f(t) - p(t)| / |f(t)|`; requires `f`
+    strictly non-vanishing on the interval.
+  - `RelativeZeroMode`: minimizes `max |f(t) - p(t)| / |t - t_z|^s`; handles
+    functions with a known finite-order zero, shifting the initial points away
+    from `t_z` and skipping it during worst-case search.
+
+- **strategy layer**: the `SearchStrategy` subtypes (`GridSearch`,
+  `GridThenLocal`, `GridThenOptim`) dispatched by `find_new_index` to locate
+  the worst-case point `tstar` in each iteration.  This is the only component
+  of the algorithm that varies between strategies; primal solve, exchange
+  pivot, and convergence check are all strategy-independent.
 
 High-level flow:
 
-1. Build or select an `EvalScheme`.
-2. Initialize discretization (`init_points`).
-3. Solve primal linear system (`solve_primal`).
-4. Locate worst violation (`find_new_index`).
-5. Exchange one index (`exchange`).
-6. Iterate in the driver until tolerance criterion is met.
+1. **Build or select an `EvalScheme`**: choose the evaluation model (Horner,
+   Estrin, FMA) and supply the unit roundoff `u` for the target platform.
+   The scheme fixes the error-model matrix that the linear solver uses.
+2. **Initialize discretization** (`init_points`): seed the active working set
+   with `n + 2` Chebyshev-distributed points on the interval.  For
+   `RelativeZeroMode` the nodes are shifted to avoid landing on the known zero
+   `t_z`.
+3. **Solve primal linear system** (`solve_primal`): given the current working
+   set, compute the polynomial coefficients and the equioscillation level that
+   the dual certificate requires.  This is a dense `(n+2) x (n+2)` system
+   solved via `LUFactorization`.
+4. **Locate worst violation** (`find_new_index`): evaluate the error objective
+   at many candidate points to find `tstar` — the point where the error most
+   exceeds the equioscillation level.  Delegates to the chosen `SearchStrategy`
+   for efficient localization.
+5. **Exchange one index** (`exchange`): remove the least-critical point from
+   the active set, insert `tstar`, and update alternation signatures.  If the
+   exchange step cannot maintain the alternation structure an `ExchangeFailure`
+   is raised.
+6. **Iterate in the driver**: repeat steps 3–5 until the relative improvement
+   in the maximum error falls below `τ` (convergence declared) or `max_iter`
+   is exhausted (a `ConvergenceFailure` is raised).
 
 ## 2. Source map
 

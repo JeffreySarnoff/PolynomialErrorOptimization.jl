@@ -7,11 +7,14 @@ fixed-degree and piecewise APIs.
 
 Use this as a first pass before fine tuning.
 
-| Goal | target | τ | max_depth | min_width | driver_max_iter | strategy |
-| --- | --- | --- | --- | --- | --- | --- |
-| Fast exploration | `1e-6` to `1e-8` | `1e-3` | `20` to `26` | `0.0` | `80` to `120` | `GridSearch(2048..4096)` |
-| Balanced production | `1e-8` to `1e-10` | `1e-3` to `5e-4` | `24` to `30` | `1e-5` to `1e-4` | `100` to `180` | `GridThenLocal` or `GridThenOptim` |
-| Aggressive accuracy | `1e-10` to `1e-12` | `5e-4` to `1e-4` | `28` to `34` | `1e-6` to `1e-5` | `180` to `300` | `GridThenOptim(6000+)` |
+| Parameter | Fast exploration | Balanced production | Aggressive accuracy |
+| --- | --- | --- | --- |
+| `target` | `1e-6` to `1e-8` | `1e-8` to `1e-10` | `1e-10` to `1e-12` |
+| `τ` (convergence tolerance) | `1e-3` | `1e-3` to `5e-4` | `5e-4` to `1e-4` |
+| `max_depth` | `20` to `26` | `24` to `30` | `28` to `34` |
+| `min_width` | `0.0` | `1e-5` to `1e-4` | `1e-6` to `1e-5` |
+| `driver_max_iter` | `80` to `120` | `100` to `180` | `180` to `300` |
+| `strategy` | `GridSearch(2048..4096)` | `GridThenLocal` or `GridThenOptim` | `GridThenOptim(6000+)` |
 
 These are starting ranges, not hard rules.
 
@@ -37,12 +40,14 @@ Recommended workflow:
 
 How to derive a first value from a user-level tolerance:
 
-1. Choose a characteristic scale `S` for your function on `I`.
+1. Choose a characteristic Scale `S` for your function on Interval `I`
+   (the approximation domain).
 2. If you have a desired relative tolerance `eps_rel`, use
-   `target ≈ eps_rel * S` as a first absolute target.
+   `target ≈ eps_rel * S` as a first absolute target, where `S` is the
+   characteristic magnitude of `f` on `I`.
 3. Re-run and adjust after observing `worst_error` and piece count.
 
-Good choices for `S`:
+Good choices for Scale `S`:
 
 - `maximum(abs.(f.(sample_grid)))` for absolute control.
 - median or high quantile of `abs(f)` when outliers dominate.
@@ -140,11 +145,16 @@ Interpretation signal:
 
 ## 5. `strategy` details (maximum-search controls)
 
-`strategy` controls how new worst-case indices are found.
+`strategy` controls how new worst-case indices are found.  In each strategy,
+`M` is the Mesh point count — the number of equally spaced evaluation points
+in the initial grid scan.
 
-- `GridSearch(M)`: most robust baseline.
-- `GridThenLocal(M; bracket)`: grid + local bounded refinement.
-- `GridThenOptim(M; bracket)`: grid + Brent refinement (`Optim`).
+- `GridSearch(M)`: most robust baseline; returns the grid point with the
+  highest error objective value.
+- `GridThenLocal(M; bracket)`: grid scan followed by golden-section local
+  refinement within `±bracket` cells of the best grid point.
+- `GridThenOptim(M; bracket)`: grid scan followed by bounded Brent
+  refinement (`Optim`) within `±bracket` cells; sharpest localization.
 
 When to use each:
 
@@ -164,16 +174,21 @@ Useful baseline from package default:
 
 - `default_strategy(scheme) = GridSearch(max(2048, 64 * (scheme.n + 2)))`.
 
-Resolution heuristic for `M`:
+Resolution heuristic for Mesh size `M`:
 
 - If hard features occur on scale `ell` (smallest width you need to resolve),
   set `M` so grid spacing `h = (I[2]-I[1])/(M-1)` satisfies `h <= ell/4`.
 
 ## 6. Other important choices
 
-- `τ` (tau): driver termination tolerance.
-  - Start at `1e-3`; tighten to `1e-4` if needed.
-  - Tightening `τ` improves certification tightness but increases runtime.
+- `τ` (tau, convergence tolerance): the relative threshold at which the
+  exchange loop declares the solution converged.  Iteration stops when the
+  ratio of the current error-bound improvement to the current error level
+  falls below `τ`.
+  - Start at `1e-3`; tighten to `1e-4` if the certified bound needs to
+    be closer to the true optimum.
+  - Tightening `τ` improves certification tightness but increases runtime,
+    sometimes substantially near the Chebyshev optimum.
 - `n` (fixed degree):
   - Lower `n` gives cheaper pieces but may force more bisection.
   - Higher `n` can reduce piece count but increase per-piece solve cost.

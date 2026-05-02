@@ -43,6 +43,33 @@ import PolynomialErrorOptimization: eval_approx_optimize,
     solution_coefficients
 ```
 
+What each import provides:
+
+- `eval_approx_optimize`: fixed-degree absolute-error optimization driver.
+  Returns an `OptimResult` with the best polynomial and a verified error bound.
+- `eval_approx_optimize_relative`: fixed-degree relative-error driver;
+  minimizes `|f(t) - p(t)| / |f(t)|`.  Requires `f` to be strictly
+  non-vanishing on the interval.
+- `eval_approx_optimize_relative_zero`: relative-error driver for functions
+  with a known finite-order zero.  The zero location `t_z` and its order `s`
+  must be supplied; the driver avoids evaluating the objective at the zero.
+- `approximate`: unified piecewise driver; dispatches to fixed-degree or
+  budget-mode path based on keyword arguments (`n` vs `max_coeffs`).
+- `approximate_abs`: piecewise fixed-degree driver for absolute-error
+  minimization.  Takes an explicit `EvalScheme` as a positional argument.
+- `approximate_abs_budget`: piecewise budget driver that optimizes across a
+  range of per-piece degrees up to `max_coeffs - 1`, chosen by `degree_policy`.
+- `GridSearch`, `GridThenLocal`, `GridThenOptim`: search strategy types.
+  Passed as the `strategy` keyword to any fixed-degree or piecewise driver.
+  See the User Guide for a detailed comparison of their performance tradeoffs.
+- `basis_info`: extracts basis metadata from a `RelativeZeroMode` result.
+  Returns a named tuple with `zero_order` (the order `s` of the known zero)
+  and `solution_basis` (`:monomial` or `:shifted`, recording the internal
+  linear system basis used by the solver).
+- `solution_coefficients`: returns the coefficient vector in the basis in
+  which the internal linear system was solved, which may differ from the
+  monomial-basis polynomial stored in `res.poly`.
+
 ### 1.1 cos: fixed degree, absolute objective
 
 ```julia
@@ -61,6 +88,15 @@ res_abs = eval_approx_optimize(f, n, I, scheme;
 @show res_abs.iterations
 @show res_abs.poly
 ```
+
+Key result fields:
+
+- `res_abs.total_error`: verified upper bound on the maximum absolute error
+  `max_{t ∈ I} |f(t) - p(t)|`.
+- `res_abs.iterations`: number of exchange iterations the driver used before
+  converging (or hitting `max_iter`).
+- `res_abs.poly`: the optimized polynomial `p` stored as a `Polynomial`
+  object in the monomial basis.
 
 Use this when you want one global polynomial and explicit control over search
 quality (`strategy`) and convergence budget (`max_iter`, `τ`).
@@ -172,6 +208,20 @@ coeffs = solution_coefficients(res_rz)
 @show res_rz.poly
 ```
 
+Key result fields:
+
+- `res_rz.total_error`: verified upper bound on the relative-zero error
+  `max_{t ∈ I} |f(t) - p(t)| / |t - t_z|^s`.
+- `res_rz.iterations`: exchange iterations used.
+- `res_rz.poly`: the optimized polynomial in the monomial basis (always,
+  even when the internal solve used a shifted basis).
+- `info.zero_order`: the order `s` of the known zero as recorded in the
+  basis metadata (here `1` for a simple zero).
+- `info.solution_basis`: `:monomial` when the solver used the standard basis,
+  `:shifted` when it used a basis centred at `t_z`.
+- `coeffs`: coefficient vector in the `solution_basis` basis; use this when
+  you need the exact coefficients the solver produced before any basis change.
+
 This recipe uses a deterministic grid and a known simple zero at the origin.
 For nonzero `t_z`, inspect `basis_info(res_rz)` and
 `solution_coefficients(res_rz)` before exporting coefficients.
@@ -179,6 +229,8 @@ For nonzero `t_z`, inspect `basis_info(res_rz)` and
 ### 1.7 acos: budget-constrained piecewise approximation
 
 Use this when you need hard limits on per-piece and total polynomial cost.
+`approximate_abs_budget` fits piecewise polynomials where each piece may use
+a different degree up to `max_coeffs - 1`, chosen by `degree_policy`.
 
 ```julia
 pa_acos_budget = approximate_abs_budget(acos, 8, (-0.99, 0.99);
@@ -196,11 +248,56 @@ pa_acos_budget = approximate_abs_budget(acos, 8, (-0.99, 0.99);
 @show pa_acos_budget.worst_error
 ```
 
-Constraints shown here:
+Positional arguments:
 
-- per-piece cap via `max_coeffs = 8`
-- global cap via `total_coeffs = 140`
-- global optimization policy via `degree_policy = :min_cost`
+- `acos`: the function to approximate.
+- `8` (`max_coeffs`): per-piece coefficient cap; each piece uses at most 8
+  coefficients, so the maximum per-piece degree is 7.
+- `(-0.99, 0.99)`: the approximation interval.  `acos` has infinite
+  derivatives at `±1` so this avoids the endpoint singularities.
+
+Keyword arguments and how they interact:
+
+- `target = 2e-8`: per-piece acceptance threshold.  A piece is accepted once
+  its verified absolute error bound `≤ 2e-8`.  Tightening this forces more
+  bisections and higher total coefficient use.
+- `degree_policy = :min_cost`: globally cost-aware degree selection.  The
+  driver tries all degrees 1–7 per piece and chooses the combination that
+  minimizes total coefficients subject to `target`.  Produces the most compact
+  model among the three policies at the cost of higher per-piece computation.
+  (`:max` always uses degree 7; `:min` uses the smallest local degree that
+  meets `target` without global coordination.)
+- `τ = 1e-3`: inner exchange convergence tolerance.  Each per-piece exchange
+  loop stops when the relative improvement falls below `τ`.  Larger values
+  converge faster but leave the error bound looser relative to the true
+  optimum; smaller values improve certification at the cost of more inner
+  iterations.
+- `max_depth = 30`: maximum bisection depth.  With interval width ≈ 1.98, the
+  minimum piece width from depth alone is `1.98 / 2^30 ≈ 1.8e-9`, well below
+  `min_width`, so `min_width` is the effective floor here.
+- `min_width = 1e-4`: minimum piece width.  Bisection stops and the piece is
+  rejected as too narrow if the sub-interval falls below `1e-4`.  This
+  prevents over-fragmentation near the endpoint singularities while still
+  allowing fine-grained coverage elsewhere.
+- `total_coeffs = 140`: global coefficient cap.  The driver stops accepting
+  new pieces once the cumulative count would exceed 140.  With `max_coeffs =
+  8` this allows at most 17 to 35 pieces depending on per-piece degree, which
+  is consistent with the expected piece count for this function and target.
+- `driver_max_iter = 120`: per-piece inner exchange budget.  If a single
+  piece does not converge within 120 iterations it is bisected.  Setting this
+  above the expected convergence count (typically 20–60 for `acos` at this
+  target) avoids premature bisection while still bounding per-piece cost.
+- `strategy = GridThenOptim(5001; bracket = 3)`: 5001-point grid scan
+  followed by bounded Brent refinement in a `±3`-cell window.  `acos` has a
+  steep slope near `±0.99`, making sharp localization worthwhile here.
+- `verbose = false`: suppresses per-piece diagnostic output.
+
+Result fields:
+
+- `pa_acos_budget.pieces`: vector of accepted pieces, each carrying its
+  sub-interval and fitted polynomial.
+- `pa_acos_budget.worst_error`: maximum verified error bound across all
+  accepted pieces; the overall guaranteed accuracy of the approximation.
 
 ### 1.8 Unified API pattern for cos and acos
 
